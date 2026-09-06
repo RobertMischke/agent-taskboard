@@ -26,6 +26,12 @@ export interface QuotaWindow {
 export interface QuotaSnapshot {
   cliType: CliType;
   fetchedAt: string;
+  /** Explicit timestamp for the last-good values displayed by the API. */
+  capturedAt?: string;
+  /** Age of capturedAt when the backend built this report. */
+  ageSeconds?: number;
+  /** Backend freshness decision; clients still age fresh values between polls. */
+  stale?: boolean;
   /** CLI `--version` output recorded alongside this probe. */
   cliVersion?: string | null;
   /** Most recent failed attempt; fetchedAt remains the last-good data time. */

@@ -48,7 +48,11 @@ public sealed class QuotaService
             foreach (var snap in _store.Read())
             {
                 if (string.IsNullOrWhiteSpace(snap.CliType)) continue;
-                _cache[snap.CliType] = snap;
+                _cache[snap.CliType] = snap with
+                {
+                    CapturedAt = snap.CapturedAt == default ? snap.FetchedAt : snap.CapturedAt,
+                    Error = string.IsNullOrWhiteSpace(snap.Error) ? null : NormalizeProbeError(snap.Error)
+                };
                 _versionTracker?.Seed(snap.CliType, snap.CliVersion);
             }
             _logger.LogInformation("Hydrated quota cache from disk ({Count} snapshots).", _cache.Count);
@@ -66,11 +70,14 @@ public sealed class QuotaService
 
     public QuotaReport GetCached()
     {
+        var now = DateTime.UtcNow;
         return new QuotaReport
         {
+            At = now,
             TtlSeconds = (int)_ttl.TotalSeconds,
             Snapshots = _probes.Keys
                 .Select(k => _cache.TryGetValue(k, out var s) ? s : new QuotaSnapshot { CliType = k })
+                .Select(s => WithFreshness(s, now))
                 .ToList()
         };
     }
@@ -147,6 +154,12 @@ public sealed class QuotaService
             {
                 snap = await ReconcileSuspiciousDropAsync(cliType, probe, previous, snap, ct);
                 snap = QuotaWindowProjection.AnchorWindowStarts(previous, snap, DateTime.UtcNow);
+                snap = snap with
+                {
+                    CapturedAt = snap.FetchedAt,
+                    AgeSeconds = 0,
+                    Stale = false
+                };
             }
             _cache[cliType] = snap;
             PersistCache();
@@ -193,7 +206,9 @@ public sealed class QuotaService
             return failed with
             {
                 Error = error,
-                ProbeFailedAt = failedAt
+                ProbeFailedAt = failedAt,
+                CapturedAt = failed.CapturedAt == default ? failed.FetchedAt : failed.CapturedAt,
+                Stale = true
             };
         }
 
@@ -202,6 +217,8 @@ public sealed class QuotaService
             CliVersion = failed.CliVersion ?? previous.CliVersion,
             ProbeFailedAt = failedAt,
             Error = error,
+            CapturedAt = previous.CapturedAt == default ? previous.FetchedAt : previous.CapturedAt,
+            Stale = true,
             RawSample = failed.RawSample ?? previous.RawSample,
             Suspicious = previous.Suspicious || failed.Suspicious,
             SuspiciousReason = failed.SuspiciousReason ?? previous.SuspiciousReason
@@ -216,6 +233,19 @@ public sealed class QuotaService
             || error.Contains("operation was cancelled", StringComparison.OrdinalIgnoreCase)
             ? "Quota probe timed out before the CLI panel rendered."
             : error;
+    }
+
+    private QuotaSnapshot WithFreshness(QuotaSnapshot snapshot, DateTime now)
+    {
+        var capturedAt = snapshot.CapturedAt == default ? snapshot.FetchedAt : snapshot.CapturedAt;
+        var age = now > capturedAt ? now - capturedAt : TimeSpan.Zero;
+        return snapshot with
+        {
+            CapturedAt = capturedAt,
+            AgeSeconds = Math.Max(0, (long)Math.Floor(age.TotalSeconds)),
+            Stale = snapshot.ProbeFailedAt.HasValue || age > _ttl,
+            Error = string.IsNullOrWhiteSpace(snapshot.Error) ? null : NormalizeProbeError(snapshot.Error)
+        };
     }
 
     /// <summary>

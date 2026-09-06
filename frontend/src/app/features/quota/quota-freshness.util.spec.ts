@@ -5,6 +5,9 @@ import { quotaProbeFailureLabel, quotaSnapshotIsStale } from './quota-freshness.
 const snapshot: QuotaSnapshot = {
   cliType: 'codex',
   fetchedAt: '2026-08-27T18:00:00Z',
+  capturedAt: '2026-08-27T18:00:00Z',
+  ageSeconds: 4_020,
+  stale: true,
   cliVersion: 'codex-cli 0.149.0',
   probeFailedAt: '2026-08-27T19:07:00Z',
   plan: 'Pro',
@@ -21,7 +24,20 @@ describe('quota freshness', () => {
 
   it('attributes the failed attempt to the exact CLI version', () => {
     const label = quotaProbeFailureLabel(snapshot);
+    expect(label).toMatch(/^stale since \d{2}:\d{2}/);
     expect(label).toContain('probe failed');
     expect(label).toContain('codex 0.149.0');
+  });
+
+  it('honours an explicit stale response even before the client TTL elapses', () => {
+    const serverMarkedStale = {
+      ...snapshot,
+      probeFailedAt: null,
+      fetchedAt: '2026-08-27T19:07:00Z',
+      capturedAt: '2026-08-27T19:07:00Z',
+      stale: true,
+    };
+
+    expect(quotaSnapshotIsStale(serverMarkedStale, 600_000, Date.parse('2026-08-27T19:07:01Z'))).toBe(true);
   });
 });

@@ -4,15 +4,15 @@ import { setTheme, type Theme } from '../helpers/theme';
 
 /**
  * Regression evidence for "Taskbar quota shows Codex missing although the
- * API delivers it (+ %-limit = 100%)" (2026-07-10).
+ * API delivers it" (2026-07-10).
  *
  * The live `/api/cli/quota` payload reports Codex windows as `unit: "%"`
  * with BOTH `used` and `limit` null and only `usedPct` set. This spec
  * mocks that exact shape and asserts:
  *  - the Codex card stays in the status-bar strip with one chip per window
  *    (a fresh, error-free snapshot never falls out of the row), and
- *  - opening the Codex modal shows the implied 100% cap in the Limit
- *    column instead of a bare "n/a" placeholder.
+ *  - opening the Codex modal shows used and remaining percentages instead of
+ *    a bare "n/a" placeholder.
  *
  * Screenshots are captured as evidence (labelled --mocked because the
  * quota route is stubbed; the rest of the app runs against the live stack).
@@ -29,6 +29,9 @@ function codexPercentQuotaReport() {
       {
         cliType: 'codex',
         fetchedAt: new Date().toISOString(),
+        capturedAt: new Date().toISOString(),
+        ageSeconds: 0,
+        stale: false,
         cliVersion: 'codex-cli 0.149.0',
         probeFailedAt: null,
         plan: 'Pro',
@@ -47,7 +50,7 @@ function codexPercentQuotaReport() {
 }
 
 test.describe('Status bar quota: Codex %-only payload', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, devBackend: _devBackend }) => {
     mkdirSync(SHOT_DIR, { recursive: true });
     await page.route('**/api/crash-recovery/pending', route => route.fulfill({ json: { pending: [] } }));
     // Specific quota route first (first-registered route wins here) so the
@@ -65,6 +68,8 @@ test.describe('Status bar quota: Codex %-only payload', () => {
   });
 
   test('Codex card renders every %-only window in both themes and never drops out', async ({ page }) => {
+    await page.waitForTimeout(1500);
+    await page.keyboard.press('Escape');
     const card = page.getByTestId('hquota-card-codex');
     await expect(card).toBeVisible();
 
@@ -84,7 +89,7 @@ test.describe('Status bar quota: Codex %-only payload', () => {
     }
   });
 
-  test('Codex modal shows the implied 100% cap in both themes, not "n/a"', async ({ page }) => {
+  test('Codex modal shows meaningful %-only quota values in both themes, not "n/a"', async ({ page }) => {
     // The backend-less worktree dev server can pop a startup "Failed to
     // load …" error dialog; let it settle and dismiss it so it does not
     // intercept the card click. (Against a live backend none of this fires.)
@@ -102,9 +107,10 @@ test.describe('Status bar quota: Codex %-only payload', () => {
 
     const windowsList = page.getByTestId('cli-usage-modal-windows');
     await expect(windowsList).toBeVisible();
-    // Each window card reads its implied 100% cap ("of 100%") for a
-    // %-window instead of a bare "n/a".
-    await expect(page.getByTestId('cli-usage-window').first()).toContainText('100%');
+    // Percentage-only windows still expose both their used and remaining
+    // values instead of a bare "n/a" placeholder.
+    await expect(page.getByTestId('cli-usage-window').first()).toContainText('66% used');
+    await expect(page.getByTestId('cli-usage-window').first()).toContainText('34% left');
     // And no window falls back to the empty "n/a" placeholder.
     await expect(windowsList).not.toContainText('n/a');
 
@@ -126,6 +132,9 @@ test.describe('Status bar quota: Codex %-only payload', () => {
       snapshots: [{
         cliType: 'codex',
         fetchedAt: failedAt,
+        capturedAt: failedAt,
+        ageSeconds: 0,
+        stale: false,
         cliVersion: 'codex-cli 0.149.0',
         probeFailedAt: null,
         plan: null,
@@ -154,6 +163,9 @@ test.describe('Status bar quota: Codex %-only payload', () => {
       snapshots: [{
         cliType: 'codex',
         fetchedAt: lastGoodAt,
+        capturedAt: lastGoodAt,
+        ageSeconds: 720,
+        stale: true,
         cliVersion: 'codex-cli 0.149.0',
         probeFailedAt: failedAt,
         plan: 'Pro',
@@ -176,6 +188,7 @@ test.describe('Status bar quota: Codex %-only payload', () => {
     await card.click();
     modal = page.getByTestId('cli-usage-modal-codex');
     const stale = modal.getByTestId('cli-usage-probe-stale');
+    await expect(stale).toContainText('stale since');
     await expect(stale).toContainText('probe failed');
     await expect(stale).toContainText('codex 0.149.0');
     await expect(stale).toContainText('showing last-good quota values');

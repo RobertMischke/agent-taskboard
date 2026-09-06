@@ -41,6 +41,19 @@ public record QuotaSnapshot
     public string CliType { get; init; } = "";
     public DateTime FetchedAt { get; init; } = DateTime.UtcNow;
     /// <summary>
+    /// UTC time at which the displayed quota values were captured. This is an
+    /// explicit wire alias for <see cref="FetchedAt"/> so clients do not have
+    /// to infer whether the timestamp belongs to the data or the HTTP report.
+    /// </summary>
+    public DateTime CapturedAt { get; init; }
+    /// <summary>Whole seconds elapsed since <see cref="CapturedAt"/> when the report was built.</summary>
+    public long AgeSeconds { get; init; }
+    /// <summary>
+    /// True when the last probe failed or the captured value is older than the
+    /// configured cache TTL. Last-good plan and window values remain readable.
+    /// </summary>
+    public bool Stale { get; init; }
+    /// <summary>
     /// Version reported by the CLI's <c>--version</c> command for this probe.
     /// Keeping it on the quota snapshot makes parser drift attributable without
     /// requiring a second operator-side reproduction.

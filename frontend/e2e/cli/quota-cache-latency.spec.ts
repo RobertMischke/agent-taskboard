@@ -10,7 +10,14 @@ test.describe('Quota cache endpoint latency', () => {
       });
       samples.push(performance.now() - started);
       expect(response.status).toBe(200);
-      await response.json();
+      const report = await response.json() as {
+        snapshots: Array<{ capturedAt?: string; ageSeconds?: number; stale?: boolean }>;
+      };
+      for (const snapshot of report.snapshots) {
+        expect(snapshot.capturedAt).toEqual(expect.any(String));
+        expect(snapshot.ageSeconds).toEqual(expect.any(Number));
+        expect(snapshot.stale).toEqual(expect.any(Boolean));
+      }
     }
 
     const evidence = {
